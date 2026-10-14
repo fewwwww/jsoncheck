@@ -1,0 +1,5 @@
+{
+  "name": "mojo",
+  "tags": ["a", "b"],
+  "nested": {"x": 1}
+}

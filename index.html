@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JSON 检查器</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0e1013;
+    --panel: #16191f;
+    --panel-2: #1c2029;
+    --line: #262b35;
+    --text: #e6e9ef;
+    --muted: #8b93a3;
+    --accent: #cdf546;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+  }
+  html[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --panel-2: #f0f2f5;
+    --line: #e2e5ea;
+    --text: #1b1f27;
+    --muted: #6b7280;
+    --accent: #6f9e00;
+    --ok: #16a34a;
+    --warn: #b45309;
+    --err: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: flex; flex-direction: column;
+    background: var(--bg); color: var(--text); font-family: var(--sans);
+    font-size: 14px; overflow: hidden;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+  h1 span { color: var(--accent); }
+  .spacer { flex: 1; }
+  button, .seg label {
+    font-family: inherit; font-size: 12.5px; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
+    padding: 5px 11px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover, .seg label:hover { border-color: var(--muted); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent); color: #14170d; border-color: transparent; font-weight: 600; }
+  html[data-theme="light"] button.primary { color: #fff; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg label { border: 0; border-radius: 0; padding: 5px 10px; color: var(--muted); }
+  .seg input { display: none; }
+  .seg input:checked + label { background: var(--panel-2); color: var(--text); font-weight: 600; }
+  .toolbar { display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+             padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  .pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .editor-pane { flex: 1.15; border-right: 1px solid var(--line); }
+  .result-pane { flex: 1; background: var(--panel); }
+
+  .editor { flex: 1; display: flex; min-height: 0; position: relative; }
+  #gutter {
+    padding: 12px 8px 12px 12px; text-align: right; color: var(--muted);
+    font-family: var(--mono); font-size: 12.5px; line-height: 20px;
+    background: var(--panel); border-right: 1px solid var(--line);
+    overflow: hidden; user-select: none; min-width: 46px; white-space: pre;
+  }
+  #gutter b { color: var(--err); font-weight: 700; }
+  #input {
+    flex: 1; resize: none; border: 0; outline: none; padding: 12px 14px;
+    background: var(--bg); color: var(--text);
+    font-family: var(--mono); font-size: 12.5px; line-height: 20px;
+    white-space: pre; overflow: auto; tab-size: 2;
+  }
+  #input::placeholder { color: var(--muted); }
+  .editor.drag::after {
+    content: "松手即可载入文件"; position: absolute; inset: 0; display: grid; place-items: center;
+    background: rgba(0,0,0,.55); color: var(--accent); font-size: 15px; pointer-events: none;
+  }
+
+  #status { display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+            border-bottom: 1px solid var(--line); font-weight: 600; }
+  #status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  #status.ok .dot { background: var(--ok); } #status.ok { color: var(--ok); }
+  #status.warn .dot { background: var(--warn); } #status.warn { color: var(--warn); }
+  #status.err .dot { background: var(--err); } #status.err { color: var(--err); }
+  #status .stats { margin-left: auto; color: var(--muted); font-weight: 400; font-size: 12px;
+                   font-family: var(--mono); }
+
+  .tabs { display: flex; gap: 2px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); }
+  .tabs button { background: transparent; border: 0; border-bottom: 2px solid transparent;
+                 border-radius: 0; padding: 6px 10px; color: var(--muted); }
+  .tabs button.on { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+  .tabs .count { font-family: var(--mono); font-size: 11px; margin-left: 4px; }
+
+  .scroll { flex: 1; overflow: auto; padding: 12px; }
+  .issue { border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px;
+           background: var(--panel-2); padding: 10px 12px; margin-bottom: 10px; }
+  .issue.error { border-left-color: var(--err); }
+  .issue.warning { border-left-color: var(--warn); }
+  .issue .head { display: flex; gap: 8px; align-items: baseline; }
+  .issue .badge { font-size: 11px; font-family: var(--mono); flex: none; }
+  .issue.error .badge { color: var(--err); } .issue.warning .badge { color: var(--warn); }
+  .issue .msg { flex: 1; line-height: 1.5; }
+  .issue .goto { font-family: var(--mono); font-size: 11.5px; color: var(--muted);
+                 background: transparent; border: 0; padding: 0 2px; text-decoration: underline; }
+  .issue .goto:hover { color: var(--accent); }
+  .issue pre { margin: 8px 0 0; font-family: var(--mono); font-size: 12px; line-height: 18px;
+               color: var(--muted); overflow-x: auto; white-space: pre; }
+  .issue pre .caret { color: var(--err); font-weight: 700; }
+  .issue .hint { margin-top: 6px; font-size: 12px; color: var(--muted); }
+
+  .empty { color: var(--muted); text-align: center; padding: 36px 12px; line-height: 1.7; }
+  .empty code { font-family: var(--mono); color: var(--text); }
+
+  .tree { font-family: var(--mono); font-size: 12.5px; line-height: 20px; }
+  .row { display: flex; align-items: flex-start; padding-left: var(--ind, 0); white-space: pre; }
+  .row:hover { background: var(--panel-2); }
+  .tw { width: 14px; flex: none; color: var(--muted); cursor: pointer; user-select: none; }
+  .k { color: var(--accent); } .s { color: #7dd3fc; } .n { color: #f0abfc; }
+  .b { color: #fbbf24; } .nl { color: var(--muted); } .meta { color: var(--muted); }
+  html[data-theme="light"] .s { color: #0369a1; } html[data-theme="light"] .n { color: #a21caf; }
+
+  .jsonl-row { display: flex; gap: 10px; font-family: var(--mono); font-size: 12px;
+               padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  .jsonl-row .no { color: var(--muted); min-width: 44px; text-align: right; }
+  .jsonl-row.bad .no { color: var(--err); }
+  .jsonl-row .txt { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  @media (max-width: 860px) {
+    main { flex-direction: column; }
+    .editor-pane { border-right: 0; border-bottom: 1px solid var(--line); flex: 1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>JSON <span>检查器</span></h1>
+  <div class="seg">
+    <input type="radio" name="mode" id="m-json" value="json" checked><label for="m-json">整份 JSON</label>
+    <input type="radio" name="mode" id="m-jsonl" value="jsonl"><label for="m-jsonl">JSON Lines</label>
+  </div>
+  <label style="display:flex;align-items:center;gap:5px;color:var(--muted);font-size:12.5px">
+    <input type="checkbox" id="strict"> 严格模式
+  </label>
+  <div class="spacer"></div>
+  <button id="theme">切换主题</button>
+</header>
+
+<div class="toolbar">
+  <button class="primary" id="fmt">格式化</button>
+  <button id="min">压缩</button>
+  <button id="sort">按键排序</button>
+  <button id="paste">粘贴</button>
+  <button id="copy">复制</button>
+  <button id="file">打开文件</button>
+  <button id="sample">载入示例</button>
+  <button id="clear">清空</button>
+  <input type="file" id="picker" hidden accept=".json,.jsonl,.ndjson,.geojson,.txt,application/json">
+</div>
+
+<main>
+  <section class="pane editor-pane">
+    <div class="editor" id="editor">
+      <div id="gutter">1</div>
+      <textarea id="input" wrap="off" spellcheck="false" autocomplete="off"
+        placeholder="把 JSON 贴进来，边打边校验&#10;也可以直接把文件拖到这里"></textarea>
+    </div>
+  </section>
+
+  <section class="pane result-pane">
+    <div id="status"><span class="dot"></span><span class="text">等待输入</span><span class="stats"></span></div>
+    <div class="tabs">
+      <button data-tab="issues" class="on">问题<span class="count" id="c-issues"></span></button>
+      <button data-tab="tree">结构树</button>
+    </div>
+    <div class="scroll" id="panel"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+
+// ------------------------------------------------------------------ 解析器
+// 手写递归下降解析，目的不是替代 JSON.parse，而是给出「第几行第几列、错在哪、
+// 大概率是什么笔误」这种能直接改的报错，外加重复键 / 大整数精度这类隐性坑。
+
+var MAX_DEPTH = 400;
+
+function lineIndex(text) {
+  var starts = [0];
+  for (var i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) starts.push(i + 1);
+  return starts;
+}
+function lineColOf(starts, index) {
+  var lo = 0, hi = starts.length - 1;
+  while (lo < hi) { var mid = (lo + hi + 1) >> 1; if (starts[mid] <= index) lo = mid; else hi = mid - 1; }
+  return { line: lo + 1, col: index - starts[lo] + 1 };
+}
+
+function checkJSON(text, opts) {
+  opts = opts || {};
+  var warnings = [], pos = 0, maxDepth = 0, keyCount = 0, nodeCount = 0;
+  var bomLeading = false;
+
+  if (text.charCodeAt(0) === 0xFEFF) { bomLeading = true; pos = 1; }
+
+  function fail(msg, at, hint) {
+    var e = new Error(msg);
+    e.at = at === undefined ? pos : at;
+    e.hint = hint;
+    throw e;
+  }
+  function warn(msg, at, hint) { warnings.push({ message: msg, at: at, hint: hint }); }
+  function ch(k) { return text.charAt(pos + (k || 0)); }
+  function eof() { return pos >= text.length; }
+
+  function ws() {
+    while (pos < text.length) {
+      var c = text.charCodeAt(pos);
+      if (c === 32 || c === 9 || c === 10 || c === 13) { pos++; continue; }
+      if (c === 47) { // '/'
+        var nxt = text.charAt(pos + 1);
+        if (nxt === '/' || nxt === '*') fail("JSON 不支持注释", pos, "去掉这段注释，或改用带注释的格式（JSON5 / JSONC）");
+      }
+      if (c === 0xFEFF) fail("这里有一个零宽字符 U+FEFF（BOM）", pos, "多半是复制粘贴带进来的，删掉即可");
+      if (c === 0xA0) fail("这里是不换行空格 U+00A0，不是普通空格", pos, "从网页复制常见，替换成普通空格");
+      if (c === 0x3000 || c === 0xFF0C || c === 0xFF1A || c === 0xFF1B || c === 0x201C || c === 0x201D) {
+        fail("这里是全角字符「" + text.charAt(pos) + "」", pos, "JSON 的标点必须是半角：, : \" 空格");
+      }
+      break;
+    }
+  }
+
+  function parseString() {
+    var start = pos;
+    pos++; // 开头的 "
+    var out = "";
+    for (;;) {
+      if (eof()) fail("字符串没有闭合，缺少结尾的双引号", start);
+      var c = text.charCodeAt(pos);
+      if (c === 34) { pos++; return out; }
+      if (c === 92) { // \
+        pos++;
+        if (eof()) fail("转义符 \\ 后面没有内容", pos - 1);
+        var e = text.charAt(pos);
+        var map = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
+        if (map[e] !== undefined) { out += map[e]; pos++; continue; }
+        if (e === 'u') {
+          var hex = text.substr(pos + 1, 4);
+          if (!/^[0-9a-fA-F]{4}$/.test(hex)) fail("\\u 后面必须跟 4 位十六进制数字", pos - 1);
+          out += String.fromCharCode(parseInt(hex, 16));
+          pos += 5;
+          continue;
+        }
+        fail("不支持的转义 \\" + e, pos - 1,
+             "JSON 只认 \\\" \\\\ \\/ \\b \\f \\n \\r \\t \\uXXXX");
+      }
+      if (c < 0x20) {
+        fail("字符串里出现了未转义的控制字符（U+" + c.toString(16).toUpperCase().padStart(4, "0") + "）",
+             pos, c === 10 ? "换行必须写成 \\n" : "改写成 \\uXXXX 形式");
+      }
+      out += text.charAt(pos);
+      pos++;
+    }
+  }
+
+  function parseNumber(path) {
+    var start = pos;
+    if (ch() === '-') pos++;
+    if (ch() === 'I') { // -Infinity
+      if (text.substr(pos, 8) === "Infinity") {
+        pos += 8;
+        warn("使用了非标准字面量 " + text.slice(start, pos), start, "标准 JSON 没有 Infinity，跨语言解析会失败");
+        return -Infinity;
+      }
+    }
+    if (ch() === '0') { pos++; if (/[0-9]/.test(ch())) fail("数字不能有多余的前导零", start); }
+    else if (/[1-9]/.test(ch())) { while (/[0-9]/.test(ch())) pos++; }
+    else fail("这里应该是一个数字", start, ch() === '.' ? "小数点前必须有整数位，写成 0.5" : undefined);
+
+    var isInt = true;
+    if (ch() === '.') {
+      isInt = false; pos++;
+      if (!/[0-9]/.test(ch())) fail("小数点后面必须有数字", pos, "不能写成 5.，要写 5.0");
+      while (/[0-9]/.test(ch())) pos++;
+    }
+    if (ch() === 'e' || ch() === 'E') {
+      isInt = false; pos++;
+      if (ch() === '+' || ch() === '-') pos++;
+      if (!/[0-9]/.test(ch())) fail("指数部分缺少数字", pos);
+      while (/[0-9]/.test(ch())) pos++;
+    }
+    if (/[0-9A-Za-z_.]/.test(ch())) {
+      fail("数字后面跟了非法字符 " + JSON.stringify(ch()), pos,
+           "JSON 的数字不支持 0x 十六进制、八进制、下划线分隔或多个小数点");
+    }
+    var lit = text.slice(start, pos);
+    var num = Number(lit);
+    if (isInt && Math.abs(num) > Number.MAX_SAFE_INTEGER) {
+      warn("大整数 " + lit + " 超出安全整数范围，解析后会丢精度（读到 " + num + "）",
+           start, "涉及金额 / ID 时建议用字符串承载" + (path ? "，位置：" + path : ""));
+    }
+    return num;
+  }
+
+  function parseValue(path, depth) {
+    if (depth > MAX_DEPTH) fail("嵌套层级过深（超过 " + MAX_DEPTH + " 层）", pos);
+    nodeCount++;
+    ws();
+    if (eof()) fail("内容意外结束，这里缺一个值", pos);
+    var c = ch();
+    if (c === '{') return parseObject(path, depth);
+    if (c === '[') return parseArray(path, depth);
+    if (c === '"') return parseString();
+    if (c === '-' || (c >= '0' && c <= '9')) return parseNumber(path);
+    if (text.substr(pos, 4) === "true") { pos += 4; return true; }
+    if (text.substr(pos, 5) === "false") { pos += 5; return false; }
+    if (text.substr(pos, 4) === "null") { pos += 4; return null; }
+    if (text.substr(pos, 3) === "NaN") {
+      pos += 3; warn("使用了非标准字面量 NaN", pos - 3, "标准 JSON 没有 NaN，跨语言解析会失败"); return NaN;
+    }
+    if (text.substr(pos, 8) === "Infinity") {
+      pos += 8; warn("使用了非标准字面量 Infinity", pos - 8, "标准 JSON 没有 Infinity"); return Infinity;
+    }
+    if (c === "'") fail("字符串要用双引号 \" 而不是单引号 '", pos);
+    if (c === '.') fail("小数点前面必须有整数位", pos, "写成 0.5 而不是 .5");
+    if (c === '+') fail("数字前面不能带正号 +", pos, "写成 5 而不是 +5");
+    if (text.substr(pos, 9) === "undefined") fail("JSON 里没有 undefined", pos, "改成 null，或直接去掉这个字段");
+    if (/[A-Za-z_$]/.test(c)) {
+      var word = (text.slice(pos).match(/^[A-Za-z_$][\w$]*/) || [c])[0];
+      fail("意外的字面量 " + word, pos, "如果是字符串，要用双引号包起来：\"" + word + "\"");
+    }
+    fail("意外的字符 " + JSON.stringify(c), pos);
+  }
+
+  function parseObject(path, depth) {
+    if (depth > maxDepth) maxDepth = depth;
+    var open = pos;
+    pos++;
+    var obj = {}, seen = Object.create(null);
+    ws();
+    if (ch() === '}') { pos++; return obj; }
+    for (;;) {
+      ws();
+      if (eof()) fail("对象没有闭合，缺少 }", open);
+      if (ch() !== '"') {
+        if (ch() === '}') fail("多余的逗号：} 前面不能有逗号", pos);
+        if (ch() === "'") fail("键名要用双引号 \" 而不是单引号 '", pos);
+        if (/[A-Za-z_$]/.test(ch())) {
+          var w = (text.slice(pos).match(/^[A-Za-z_$][\w$]*/) || [""])[0];
+          fail("键名必须用双引号包裹", pos, '写成 "' + w + '"');
+        }
+        fail("这里应该是一个用双引号包裹的键名", pos);
+      }
+      var keyAt = pos;
+      var key = parseString();
+      keyCount++;
+      var child = path ? path + "." + key : key;
+      if (seen[key]) warn("重复的键：" + child, keyAt, "后面的值会覆盖前面的，多数解析器不会报错，容易埋雷");
+      seen[key] = true;
+      ws();
+      if (ch() !== ':') fail("键名 \"" + key + "\" 后面缺少冒号 :", pos);
+      pos++;
+      obj[key] = parseValue(child, depth + 1);
+      ws();
+      if (ch() === ',') {
+        var comma = pos; pos++; ws();
+        if (ch() === '}') fail("多余的逗号：} 前面不能有逗号", comma);
+        continue;
+      }
+      if (ch() === '}') { pos++; return obj; }
+      if (eof()) fail("对象没有闭合，缺少 }", open);
+      fail("这里缺少逗号 , 或右花括号 }", pos, "上一个字段结束后应该跟 , 或 }");
+    }
+  }
+
+  function parseArray(path, depth) {
+    if (depth > maxDepth) maxDepth = depth;
+    var open = pos;
+    pos++;
+    var arr = [];
+    ws();
+    if (ch() === ']') { pos++; return arr; }
+    for (;;) {
+      ws();
+      if (eof()) fail("数组没有闭合，缺少 ]", open);
+      if (ch() === ']') fail("多余的逗号：] 前面不能有逗号", pos);
+      arr.push(parseValue(path + "[" + arr.length + "]", depth + 1));
+      ws();
+      if (ch() === ',') {
+        var comma = pos; pos++; ws();
+        if (ch() === ']') fail("多余的逗号：] 前面不能有逗号", comma);
+        continue;
+      }
+      if (ch() === ']') { pos++; return arr; }
+      if (eof()) fail("数组没有闭合，缺少 ]", open);
+      fail("这里缺少逗号 , 或右方括号 ]", pos);
+    }
+  }
+
+  var result = { ok: false, value: undefined, errors: [], warnings: warnings,
+                 stats: { depth: 0, keys: 0, nodes: 0 } };
+
+  if (!text.trim()) { result.errors.push({ message: "内容为空", at: 0 }); return result; }
+  if (bomLeading) warn("文件以 BOM（U+FEFF）开头", 0, "部分解析器会直接报错，建议存成不带 BOM 的 UTF-8");
+
+  try {
+    var value = parseValue("", 1);
+    ws();
+    if (!eof()) {
+      fail("结尾有多余内容", pos,
+           "一份 JSON 只能有一个顶层值；如果是每行一条，切到「JSON Lines」模式");
+    }
+    result.ok = true;
+    result.value = value;
+  } catch (e) {
+    result.errors.push({ message: e.message, at: e.at || 0, hint: e.hint });
+  }
+  result.stats = { depth: maxDepth, keys: keyCount, nodes: nodeCount };
+  if (opts.strict) {
+    result.warnings.forEach(function (w) { w.promoted = true; });
+  }
+  return result;
+}
+
+// ------------------------------------------------------------------ 工具
+function el(id) { return document.getElementById(id); }
+var input = el("input"), gutter = el("gutter"), panel = el("panel"), statusBar = el("status");
+var starts = [0], current = null, tab = "issues", timer = null;
+
+function excerpt(text, at) {
+  var st = lineIndex(text), lc = lineColOf(st, at);
+  var lines = text.split("\n");
+  var from = Math.max(0, lc.line - 3), out = [];
+  var width = String(lc.line).length;
+  for (var i = from; i < lc.line && i < lines.length; i++) {
+    var no = String(i + 1).padStart(width, " ");
+    out.push({ text: "  " + no + " | " + lines[i].replace(/\t/g, "  ") });
+  }
+  var before = lines[lc.line - 1] ? lines[lc.line - 1].slice(0, lc.col - 1) : "";
+  var pad = before.replace(/\t/g, "  ").replace(/[^\t]/g, " ");
+  out.push({ caret: " ".repeat(width + 5) + pad + "^" });
+  return { lines: out, line: lc.line, col: lc.col };
+}
+
+function issueNode(kind, item, text) {
+  var box = document.createElement("div");
+  box.className = "issue " + kind;
+  var ex = item.at !== undefined && item.at !== null ? excerpt(text, item.at) : null;
+
+  var head = document.createElement("div");
+  head.className = "head";
+  var badge = document.createElement("span");
+  badge.className = "badge";
+  badge.textContent = kind === "error" ? "错误" : "警告";
+  var msg = document.createElement("div");
+  msg.className = "msg";
+  msg.textContent = item.message;
+  head.appendChild(badge);
+  head.appendChild(msg);
+  if (ex) {
+    var go = document.createElement("button");
+    go.className = "goto";
+    go.textContent = "第 " + ex.line + " 行 : " + ex.col + " 列";
+    go.onclick = function () {
+      input.focus();
+      input.setSelectionRange(item.at, item.at);
+      var lh = 20;
+      input.scrollTop = Math.max(0, (ex.line - 4) * lh);
+      syncGutter();
+    };
+    head.appendChild(go);
+  }
+  box.appendChild(head);
+
+  if (ex) {
+    var pre = document.createElement("pre");
+    ex.lines.forEach(function (l) {
+      if (l.caret !== undefined) {
+        var s = document.createElement("span");
+        s.className = "caret";
+        s.textContent = l.caret;
+        pre.appendChild(s);
+      } else {
+        pre.appendChild(document.createTextNode(l.text + "\n"));
+      }
+    });
+    box.appendChild(pre);
+  }
+  if (item.hint) {
+    var hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = "→ " + item.hint;
+    box.appendChild(hint);
+  }
+  return box;
+}
+
+// ------------------------------------------------------------------ 结构树
+function typeOf(v) {
+  if (v === null) return "null";
+  if (Array.isArray(v)) return "array";
+  return typeof v;
+}
+function preview(v) {
+  var t = typeOf(v);
+  var s = document.createElement("span");
+  if (t === "string") { s.className = "s"; s.textContent = JSON.stringify(v); }
+  else if (t === "number") { s.className = "n"; s.textContent = Number.isFinite(v) ? String(v) : String(v); }
+  else if (t === "boolean") { s.className = "b"; s.textContent = String(v); }
+  else if (t === "null") { s.className = "nl"; s.textContent = "null"; }
+  else if (t === "array") { s.className = "meta"; s.textContent = "[ ] " + v.length + " 项"; }
+  else { s.className = "meta"; s.textContent = "{ } " + Object.keys(v).length + " 个键"; }
+  return s;
+}
+function treeRow(key, value, depth, container) {
+  var t = typeOf(value);
+  var expandable = (t === "object" && Object.keys(value).length) || (t === "array" && value.length);
+  var row = document.createElement("div");
+  row.className = "row";
+  row.style.setProperty("--ind", (depth * 14) + "px");
+
+  var tw = document.createElement("span");
+  tw.className = "tw";
+  tw.textContent = expandable ? "▸" : " ";
+  row.appendChild(tw);
+
+  if (key !== null) {
+    var k = document.createElement("span");
+    k.className = "k";
+    k.textContent = key;
+    row.appendChild(k);
+    row.appendChild(document.createTextNode(": "));
+  }
+  row.appendChild(preview(value));
+  container.appendChild(row);
+
+  if (!expandable) return;
+  var kids = document.createElement("div");
+  kids.style.display = "none";
+  container.appendChild(kids);
+  var built = false;
+  tw.onclick = row.onclick = function () {
+    var open = kids.style.display === "none";
+    kids.style.display = open ? "" : "none";
+    tw.textContent = open ? "▾" : "▸";
+    if (open && !built) {
+      built = true;
+      var entries = t === "array"
+        ? value.map(function (v, i) { return ["[" + i + "]", v]; })
+        : Object.keys(value).map(function (k2) { return [JSON.stringify(k2), value[k2]]; });
+      entries.slice(0, 2000).forEach(function (e) { treeRow(e[0], e[1], depth + 1, kids); });
+      if (entries.length > 2000) {
+        var more = document.createElement("div");
+        more.className = "row meta";
+        more.style.setProperty("--ind", ((depth + 1) * 14) + "px");
+        more.textContent = "… 还有 " + (entries.length - 2000) + " 项未展开";
+        kids.appendChild(more);
+      }
+    }
+  };
+}
+
+// ------------------------------------------------------------------ 渲染
+function setStatus(kind, textStr, stats) {
+  statusBar.className = kind;
+  statusBar.querySelector(".text").textContent = textStr;
+  statusBar.querySelector(".stats").textContent = stats || "";
+}
+
+function bytesOf(s) { return new TextEncoder().encode(s).length; }
+function human(n) {
+  if (n < 1024) return n + " B";
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+  return (n / 1024 / 1024).toFixed(2) + " MB";
+}
+
+function render() {
+  var text = input.value;
+  var strict = el("strict").checked;
+  var mode = document.querySelector('input[name="mode"]:checked').value;
+  panel.innerHTML = "";
+
+  if (!text.trim()) {
+    setStatus("", "等待输入", "");
+    el("c-issues").textContent = "";
+    panel.innerHTML = '<div class="empty">把 JSON 贴进左边的框里<br>会边打边校验，出错时直接给出<code>行:列</code>和原因</div>';
+    current = null;
+    return;
+  }
+
+  var stats = human(bytesOf(text)) + " · " + text.split("\n").length + " 行";
+
+  if (mode === "jsonl") {
+    renderJSONL(text, strict, stats);
+    return;
+  }
+
+  var res = checkJSON(text, { strict: strict });
+  current = res;
+  var errors = res.errors.slice();
+  var warns = res.warnings.slice();
+  if (strict) { errors = errors.concat(warns); warns = []; }
+
+  var full = stats + " · 深度 " + res.stats.depth + " · " + res.stats.keys + " 键";
+  if (errors.length) setStatus("err", "不是合法 JSON", full);
+  else if (warns.length) setStatus("warn", "合法，但有 " + warns.length + " 条警告", full);
+  else setStatus("ok", "合法 JSON", full);
+
+  el("c-issues").textContent = (errors.length + warns.length) ? "(" + (errors.length + warns.length) + ")" : "";
+
+  if (tab === "tree") {
+    if (!res.ok) {
+      panel.innerHTML = '<div class="empty">先修好语法错误，才能看结构树</div>';
+      return;
+    }
+    var box = document.createElement("div");
+    box.className = "tree";
+    treeRow(null, res.value, 0, box);
+    panel.appendChild(box);
+    box.querySelector(".row").click();
+    return;
+  }
+
+  if (!errors.length && !warns.length) {
+    panel.innerHTML = '<div class="empty">✓ 没有发现问题</div>';
+    return;
+  }
+  errors.forEach(function (e) { panel.appendChild(issueNode("error", e, text)); });
+  warns.forEach(function (w) { panel.appendChild(issueNode("warning", w, text)); });
+}
+
+function renderJSONL(text, strict, stats) {
+  var lines = text.split("\n");
+  var bad = 0, valid = 0, issues = [];
+  var offset = 0;
+  lines.forEach(function (raw, i) {
+    var lineStart = offset;
+    offset += raw.length + 1;
+    if (!raw.trim()) return;
+    var res = checkJSON(raw, { strict: strict });
+    var errs = res.errors.slice();
+    if (strict) errs = errs.concat(res.warnings);
+    if (errs.length) {
+      bad++;
+      errs.forEach(function (e) {
+        issues.push({ message: "第 " + (i + 1) + " 行：" + e.message, at: lineStart + (e.at || 0), hint: e.hint });
+      });
+    } else {
+      valid++;
+      res.warnings.forEach(function (w) {
+        issues.push({ warn: true, message: "第 " + (i + 1) + " 行：" + w.message,
+                      at: lineStart + (w.at || 0), hint: w.hint });
+      });
+    }
+  });
+
+  var full = stats + " · " + valid + " 条合法" + (bad ? " · " + bad + " 条错误" : "");
+  if (bad) setStatus("err", "有 " + bad + " 行不是合法 JSON", full);
+  else if (issues.length) setStatus("warn", "全部合法，有 " + issues.length + " 条警告", full);
+  else setStatus("ok", valid + " 条 JSON 全部合法", full);
+  el("c-issues").textContent = issues.length ? "(" + issues.length + ")" : "";
+
+  if (tab === "tree") {
+    panel.innerHTML = '<div class="empty">JSON Lines 模式不提供结构树<br>切回「整份 JSON」查看</div>';
+    return;
+  }
+  if (!issues.length) { panel.innerHTML = '<div class="empty">✓ 没有发现问题</div>'; return; }
+  issues.slice(0, 300).forEach(function (it) {
+    panel.appendChild(issueNode(it.warn ? "warning" : "error", it, text));
+  });
+  if (issues.length > 300) {
+    var more = document.createElement("div");
+    more.className = "empty";
+    more.textContent = "… 还有 " + (issues.length - 300) + " 条未显示";
+    panel.appendChild(more);
+  }
+}
+
+// ------------------------------------------------------------------ 编辑器
+function syncGutter() {
+  var count = input.value.split("\n").length;
+  var errLine = null;
+  if (current && current.errors.length && current.errors[0].at !== undefined) {
+    errLine = lineColOf(lineIndex(input.value), current.errors[0].at).line;
+  }
+  var html = "";
+  for (var i = 1; i <= count; i++) html += (i === errLine ? "<b>" + i + "</b>" : i) + "\n";
+  gutter.innerHTML = html;
+  gutter.scrollTop = input.scrollTop;
+}
+
+function schedule() {
+  clearTimeout(timer);
+  timer = setTimeout(function () {
+    render();
+    syncGutter();
+    try { localStorage.setItem("jsoncheck:text", input.value); } catch (e) {}
+  }, 120);
+}
+
+input.addEventListener("input", function () { syncGutter(); schedule(); });
+input.addEventListener("scroll", function () { gutter.scrollTop = input.scrollTop; });
+input.addEventListener("keydown", function (e) {
+  if (e.key === "Tab") {
+    e.preventDefault();
+    var s = input.selectionStart, t = input.selectionEnd;
+    input.value = input.value.slice(0, s) + "  " + input.value.slice(t);
+    input.selectionStart = input.selectionEnd = s + 2;
+    schedule();
+  }
+});
+
+// 工具栏
+function setText(v) { input.value = v; syncGutter(); render(); try { localStorage.setItem("jsoncheck:text", v); } catch (e) {} }
+
+el("fmt").onclick = function () {
+  var mode = document.querySelector('input[name="mode"]:checked').value;
+  if (mode === "jsonl") {
+    var out = input.value.split("\n").filter(function (l) { return l.trim(); }).map(function (l) {
+      var r = checkJSON(l, {});
+      return r.ok ? JSON.stringify(r.value) : l;
+    });
+    setText(out.join("\n"));
+    return;
+  }
+  var res = checkJSON(input.value, {});
+  if (!res.ok) { flash("有语法错误，先修好再格式化"); return; }
+  setText(JSON.stringify(res.value, null, 2));
+};
+el("min").onclick = function () {
+  var res = checkJSON(input.value, {});
+  if (!res.ok) { flash("有语法错误，压缩不了"); return; }
+  setText(JSON.stringify(res.value));
+};
+el("sort").onclick = function () {
+  var res = checkJSON(input.value, {});
+  if (!res.ok) { flash("有语法错误，排不了序"); return; }
+  var sortDeep = function (v) {
+    if (Array.isArray(v)) return v.map(sortDeep);
+    if (v && typeof v === "object") {
+      var out = {};
+      Object.keys(v).sort().forEach(function (k) { out[k] = sortDeep(v[k]); });
+      return out;
+    }
+    return v;
+  };
+  setText(JSON.stringify(sortDeep(res.value), null, 2));
+};
+el("copy").onclick = function () {
+  navigator.clipboard.writeText(input.value).then(function () { flash("已复制"); },
+    function () { flash("复制失败，手动选中吧"); });
+};
+el("paste").onclick = function () {
+  navigator.clipboard.readText().then(function (t) { setText(t); },
+    function () { flash("浏览器不给读剪贴板，直接 ⌘V 贴进左边"); });
+};
+el("clear").onclick = function () { setText(""); input.focus(); };
+el("file").onclick = function () { el("picker").click(); };
+el("picker").onchange = function (e) { if (e.target.files[0]) loadFile(e.target.files[0]); };
+el("sample").onclick = function () {
+  setText('{\n  "name": "jsoncheck",\n  "ok": true,\n  "count": 3,\n  "count": 4,\n  "amount": 12345678901234567890,\n  "tags": ["a", "b"],\n  "nested": { "x": 1, "y": [1, 2, { "deep": null }] }\n}');
+};
+el("strict").onchange = render;
+Array.prototype.forEach.call(document.querySelectorAll('input[name="mode"]'), function (r) {
+  r.onchange = render;
+});
+Array.prototype.forEach.call(document.querySelectorAll(".tabs button"), function (b) {
+  b.onclick = function () {
+    Array.prototype.forEach.call(document.querySelectorAll(".tabs button"), function (x) { x.classList.remove("on"); });
+    b.classList.add("on");
+    tab = b.dataset.tab;
+    render();
+  };
+});
+
+// 主题
+var saved = null;
+try { saved = localStorage.getItem("jsoncheck:theme"); } catch (e) {}
+if (saved) document.documentElement.dataset.theme = saved;
+else if (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches) {
+  document.documentElement.dataset.theme = "light";
+}
+el("theme").onclick = function () {
+  var next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("jsoncheck:theme", next); } catch (e) {}
+};
+
+// 拖拽载入
+var editor = el("editor");
+["dragenter", "dragover"].forEach(function (evt) {
+  editor.addEventListener(evt, function (e) { e.preventDefault(); editor.classList.add("drag"); });
+});
+["dragleave", "drop"].forEach(function (evt) {
+  editor.addEventListener(evt, function (e) { e.preventDefault(); editor.classList.remove("drag"); });
+});
+editor.addEventListener("drop", function (e) {
+  var f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+function loadFile(f) {
+  if (f.size > 20 * 1024 * 1024) { flash("文件超过 20 MB，浏览器里跑会卡，建议用命令行版 jsoncheck.py"); return; }
+  var reader = new FileReader();
+  reader.onload = function () {
+    setText(String(reader.result));
+    if (/\.(jsonl|ndjson)$/i.test(f.name)) el("m-jsonl").checked = true;
+    render();
+  };
+  reader.readAsText(f);
+}
+
+// 提示条
+function flash(msg) {
+  var t = document.createElement("div");
+  t.textContent = msg;
+  t.style.cssText = "position:fixed;left:50%;bottom:28px;transform:translateX(-50%);background:var(--panel-2);" +
+    "border:1px solid var(--line);color:var(--text);padding:8px 14px;border-radius:8px;font-size:13px;z-index:9;";
+  document.body.appendChild(t);
+  setTimeout(function () { t.remove(); }, 2200);
+}
+
+// 启动
+try {
+  var last = localStorage.getItem("jsoncheck:text");
+  if (last) input.value = last;
+} catch (e) {}
+syncGutter();
+render();
+input.focus();
+</script>
+</body>
+</html>
